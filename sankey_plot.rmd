@@ -1,0 +1,265 @@
+---
+title: "Sankey diagram"
+author: "Steven De La Garza"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r}
+# install.packages(c("readr","dplyr","stringr","plotly","htmlwidgets"))
+library(readr)
+library(dplyr)
+library(stringr)
+library(plotly)
+library(htmlwidgets)
+
+# ---- 1) Load ----
+csv_path <- "/Users/stevendelagarza/Desktop/IQuESt/service_code_with_risk_FULL_3.csv"  # adjust if needed
+df <- read_csv(csv_path, show_col_types = FALSE)
+
+# ---- 2) Normalize fields ----
+# SOC active: non-missing soc_4dig_num → Active
+df <- df %>%
+  mutate(
+    SOC_status = if_else(!is.na(soc_4dig_num), "Active", "Inactive"),
+    branch     = service_norm %>% as.character() %>% str_trim(),
+    branch     = if_else(is.na(branch) | branch == "" | tolower(branch) == "nan",
+                         "Unknown", branch),
+    risk_final_norm = risk_final %>% as.character() %>% str_trim() %>% str_to_lower(),
+    risk_label = case_when(
+      risk_final_norm %in% c("high","moderate","low") ~ str_to_title(risk_final_norm),
+      TRUE ~ "None"
+    )
+  )
+
+# ---- 3) Collapse rare branches (optional) ----
+MAX_BRANCHES <- 12
+top_branches <- df %>%
+  count(branch, sort = TRUE) %>%
+  slice_head(n = MAX_BRANCHES) %>%
+  pull(branch)
+
+df <- df %>%
+  mutate(branch = if_else(branch %in% top_branches, branch, "Other"))
+
+# ---- 4) Define nodes (order: SOC → Branch → Risk) ----
+nodes_soc   <- c("SOC active: Active", "SOC active: Inactive")
+nodes_br    <- sort(unique(df$branch))
+nodes_risk  <- c("Noise risk: High", "Noise risk: Moderate", "Noise risk: Low", "Noise risk: None")
+
+all_nodes   <- c(nodes_soc, nodes_br, nodes_risk)
+
+# plotly uses 0-based node indices; build a lookup
+idx <- setNames(seq_along(all_nodes) - 1L, all_nodes)
+
+# ---- 5) Build links ----
+# 5a) SOC → Branch
+g1 <- df %>%
+  count(SOC_status, branch, name = "n")
+
+links1 <- tibble::tibble(
+  source = idx[paste0("SOC active: ", g1$SOC_status)],
+  target = idx[g1$branch],
+  value  = g1$n,
+  label  = paste0(g1$SOC_status, " → ", g1$branch, ": ", g1$n)
+)
+
+# 5b) Branch → Risk
+g2 <- df %>%
+  count(branch, risk_label, name = "n")
+
+links2 <- tibble::tibble(
+  source = idx[g2$branch],
+  target = idx[paste0("Noise risk: ", g2$risk_label)],
+  value  = g2$n,
+  label  = paste0(g2$branch, " → ", g2$risk_label, ": ", g2$n)
+)
+
+links <- bind_rows(links1, links2)
+
+# ---- 6) Plot ----
+p <- plot_ly(
+  type = "sankey",
+  arrangement = "snap",
+  node = list(
+    label = all_nodes,
+    pad = 20,
+    thickness = 18,
+    line = list(width = 0.5)
+  ),
+  link = list(
+    source = links$source,
+    target = links$target,
+    value  = links$value,
+    label  = links$label,
+    hovertemplate = "%{label}<extra></extra>"
+  )
+) %>%
+  layout(
+    title = "SOC Active → Branch → Noise Risk (risk_final)",
+    font = list(size = 12),
+    width = 1200, height = 700
+  )
+
+# View in RStudio Viewer / browser
+p
+
+# Save to standalone HTML (double-click to open)
+saveWidget(p, "sankey_soc_branch_risk.html", selfcontained = TRUE)
+```
+
+
+
+```{r}
+# install.packages(c("readr","dplyr","stringr","tidyr","plotly","htmlwidgets"))
+library(readr)
+library(dplyr)
+library(stringr)
+library(tidyr)
+library(plotly)
+library(htmlwidgets)
+
+# ---- 1) Load ----
+csv_path <- "/Users/stevendelagarza/Desktop/IQuESt/service_code_with_risk_FULL_3.csv"  # adjust if needed
+df <- read_csv(csv_path, show_col_types = FALSE)
+
+# ---- 2) Normalize fields ----
+df <- df %>%
+  mutate(
+    SOC_status = if_else(!is.na(soc_4dig_num), "Active", "Inactive"),
+    branch     = service_norm %>% as.character() %>% str_trim(),
+    branch     = if_else(is.na(branch) | branch == "" | tolower(branch) == "nan", "Unknown", branch),
+    risk_final_norm = risk_final %>% as.character() %>% str_trim() %>% str_to_lower(),
+    risk_label = case_when(
+      risk_final_norm %in% c("high","moderate","low") ~ str_to_title(risk_final_norm),
+      TRUE ~ "None"
+    )
+  )
+
+# ---- 3) Collapse rare branches (optional) ----
+MAX_BRANCHES <- 12
+top_branches <- df %>%
+  count(branch, sort = TRUE) %>%
+  slice_head(n = MAX_BRANCHES) %>%
+  pull(branch)
+
+df <- df %>%
+  mutate(branch = if_else(branch %in% top_branches, branch, "Other"))
+
+# ---- 4) Define nodes (SOC → Branch → Risk) ----
+nodes_soc   <- c("SOC active: Active", "SOC active: Inactive")
+nodes_br    <- sort(unique(df$branch))
+nodes_risk  <- c("Noise risk: High", "Noise risk: Moderate", "Noise risk: Low", "Noise risk: None")
+
+all_nodes   <- c(nodes_soc, nodes_br, nodes_risk)
+idx <- setNames(seq_along(all_nodes) - 1L, all_nodes)
+
+# ---- 5) Build links ----
+# SOC → Branch
+g1 <- df %>% count(SOC_status, branch, name = "n")
+links1 <- tibble::tibble(
+  source = idx[paste0("SOC active: ", g1$SOC_status)],
+  target = idx[g1$branch],
+  value  = g1$n,
+  label  = paste0(g1$SOC_status, " → ", g1$branch, ": ", g1$n)
+)
+
+# Branch → Risk
+g2 <- df %>% count(branch, risk_label, name = "n")
+links2 <- tibble::tibble(
+  source = idx[g2$branch],
+  target = idx[paste0("Noise risk: ", g2$risk_label)],
+  value  = g2$n,
+  label  = paste0(g2$branch, " → ", g2$risk_label, ": ", g2$n)
+)
+
+links <- bind_rows(links1, links2)
+
+# ---- 6) Build per-branch tooltips (customdata for nodes) ----
+library(tidyr)
+
+branch_risk_summary <- df %>%
+  count(branch, risk_label, name = "n") %>%
+  pivot_wider(names_from = risk_label, values_from = n, values_fill = 0)
+
+# Ensure all risk columns exist (even if absent in data)
+for (nm in c("High","Moderate","Low","None")) {
+  if (!nm %in% names(branch_risk_summary)) branch_risk_summary[[nm]] <- 0L
+}
+
+# Coerce risk columns to integer and compute totals
+branch_risk_summary <- branch_risk_summary %>%
+  mutate(
+    High     = as.integer(High),
+    Moderate = as.integer(Moderate),
+    Low      = as.integer(Low),
+    None     = as.integer(None),
+    Total    = High + Moderate + Low + None
+  )
+
+# (Optional) percents for nicer tooltips
+branch_risk_summary <- branch_risk_summary %>%
+  mutate(
+    pHigh     = if_else(Total > 0, round(100 * High     / Total, 1), 0),
+    pModerate = if_else(Total > 0, round(100 * Moderate / Total, 1), 0),
+    pLow      = if_else(Total > 0, round(100 * Low      / Total, 1), 0),
+    pNone     = if_else(Total > 0, round(100 * None     / Total, 1), 0)
+  )
+
+# Map: branch -> tooltip string (counts + percents)
+branch_tooltip <- setNames(
+  paste0(
+    "Branch: ", branch_risk_summary$branch, "<br>",
+    "High: ",     branch_risk_summary$High, " (", branch_risk_summary$pHigh, "%)<br>",
+    "Moderate: ", branch_risk_summary$Moderate, " (", branch_risk_summary$pModerate, "%)<br>",
+    "Low: ",      branch_risk_summary$Low, " (", branch_risk_summary$pLow, "%)<br>",
+    "None: ",     branch_risk_summary$None, " (", branch_risk_summary$pNone, "%)<br>",
+    "Total: ",    branch_risk_summary$Total
+  ),
+  branch_risk_summary$branch
+)
+
+# Create a customdata vector aligned to all_nodes
+node_customdata <- all_nodes
+# For branch nodes, replace with rich tooltip; for others, keep label
+for (b in nodes_br) {
+  node_customdata[which(all_nodes == b)] <- branch_tooltip[[b]]
+}
+node_customdata[all_nodes %in% nodes_soc | all_nodes %in% nodes_risk] <-
+  all_nodes[all_nodes %in% c(nodes_soc, nodes_risk)]
+
+# Then keep your plot_ly() call the same, using:
+# node = list(..., customdata = node_customdata, hovertemplate = "%{customdata}<extra></extra>")
+
+# ---- 7) Plot ----
+p <- plot_ly(
+  type = "sankey",
+  arrangement = "snap",
+  node = list(
+    label = all_nodes,
+    pad = 20,
+    thickness = 18,
+    line = list(width = 0.5),
+    customdata = node_customdata,
+    hovertemplate = "%{customdata}<extra></extra>"
+  ),
+  link = list(
+    source = links$source,
+    target = links$target,
+    value  = links$value,
+    label  = links$label,
+    hovertemplate = "%{label}<extra></extra>"
+  )
+) %>%
+  layout(
+    title = "SOC Active → Branch → Noise Risk (branch node tooltips show risk breakdown)",
+    font = list(size = 12),
+    width = 1200, height = 700
+  )
+
+p
+# Save to HTML if you like:
+# htmlwidgets::saveWidget(p, "/Users/stevendelagarza/Desktop/IQuESt/sankey_soc_branch_risk_branch-tooltips.html", selfcontained = TRUE)
+```
+
+
